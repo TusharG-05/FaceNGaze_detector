@@ -1,0 +1,7 @@
+main.py
+temp_old.py
+venv/
+__pycache__/
+*.mp4
+*.log
+.DS_Store
