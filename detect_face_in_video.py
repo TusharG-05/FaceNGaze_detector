@@ -99,8 +99,12 @@ class FaceDetector:
 
     def close(self):
         """Cleanup resources"""
-        self.worker.terminate()
-        self.worker.join()
+        # Send Sentinel to stop the worker gracefully
+        try:
+            self.frame_queue.put(None)
+            self.worker.join()
+        except:
+            self.worker.terminate() # Fallback
 
 # =============================
 # MOCK FRONTEND (Simulating a Server)
