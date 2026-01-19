@@ -5,25 +5,16 @@ import multiprocessing
 import os
 import face_recognition
 
-# =============================
-# WORKER PROCESS
-# =============================
 def face_recognition_worker(frame_queue, result_queue, known_encoding):
-    """
-    Runs in a separate process.
-    Constantly pulls frames from the queue and performs face recognition.
-    """
     while True:
         try:
-            # Get frame (blocking with timeout to allow clean exit)
             rgb_small_frame = frame_queue.get(timeout=1)
         except:
             continue
 
         if rgb_small_frame is None:
-            break # Sentinel to stop
+            break
 
-        # Perform the heavy lifting
         try:
             face_encodings = face_recognition.face_encodings(rgb_small_frame)
             
@@ -31,29 +22,20 @@ def face_recognition_worker(frame_queue, result_queue, known_encoding):
             min_dist = 1.0
             
             if len(face_encodings) > 0:
-                # Compare detected faces to known face
-                # face_distance returns an array of distances
                 distances = face_recognition.face_distance([known_encoding], face_encodings[0])
                 min_dist = distances[0]
                 if min_dist <= 0.5: # Threshold
                     match_found = True
             
             # Send result back
-            # Format: (found_boolean, distance_float)
             if not result_queue.full():
                 result_queue.put((match_found, min_dist))
                 
         except Exception as e:
             print(f"Worker Error: {e}")
 
-# =============================
-# FACE DETECTOR CLASS (API READY)
-# =============================
 class FaceDetector:
     def __init__(self, known_person_path="known_person.jpg"):
-        """
-        Initialize the separate process and load the known face.
-        """
         print("Initializing FaceDetector...")
         if not os.path.exists(known_person_path):
             raise FileNotFoundError(f"Error: {known_person_path} not found")
@@ -77,28 +59,21 @@ class FaceDetector:
         print("Worker process started.")
 
     def process_frame(self, frame_bgr):
-        """
-        Accepts a BGR frame (from OpenCV/Camera), sends it to the worker,
-        and returns the LATEST known result (non-blocking).
-        Returns: (is_found, distance) or (None, None) if no new result.
-        """
-        # 1. Resize & Convert to RGB (Optimization)
-        # We do this here to lighten the load on the IPC (Inter-Process Communication)
+        # 1. Resize & Convert to RGB
         small_frame = cv2.resize(frame_bgr, (0, 0), fx=0.25, fy=0.25)
         rgb_small_frame = np.ascontiguousarray(small_frame[:, :, ::-1])
 
-        # 2. Put in Queue (Non-blocking drop)
+        # 2. Put in Queue
         if not self.frame_queue.full():
             self.frame_queue.put(rgb_small_frame)
 
-        # 3. Check for Result (Non-blocking peek)
+        # 3. Check for Result
         try:
             return self.result_queue.get_nowait()
         except:
-            return None, None # No new result ready yet
+            return None, None 
 
     def close(self):
-        """Cleanup resources"""
         # Send Sentinel to stop the worker gracefully
         try:
             self.frame_queue.put(None)
@@ -110,7 +85,6 @@ class FaceDetector:
 # MOCK FRONTEND (Simulating a Server)
 # =============================
 if __name__ == "__main__":
-    # This block simulates what your "FastAPI" or "Flask" app would do.
     # It opens the camera locally to test the Class.
     
     detector = FaceDetector()
@@ -133,7 +107,6 @@ if __name__ == "__main__":
         if not ret: break
 
         # === THE API CALL ===
-        # In a real app, 'frame' comes from the webpage.
         result = detector.process_frame(frame) 
         
         # Update State if we got a fresh result
