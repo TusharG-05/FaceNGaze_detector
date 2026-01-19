@@ -5,14 +5,23 @@ import mediapipe as mp
 import time
 
 def gaze_worker(frame_queue, result_queue, max_faces):
-    mp_face_mesh = mp.solutions.face_mesh
-    # Set max_num_faces to a high number to detect everyone, so we can enforce our own limit.
-    face_mesh = mp_face_mesh.FaceMesh(
-        max_num_faces=10, 
-        refine_landmarks=True,
-        min_detection_confidence=0.3, # Lowered for long distance
+    from mediapipe.tasks import python
+    from mediapipe.tasks.python import vision
+    import mediapipe as mp
+
+    # Create the options for FaceLandmarker
+    base_options = python.BaseOptions(model_asset_path='face_landmarker.task')
+    options = vision.FaceLandmarkerOptions(
+        base_options=base_options,
+        output_face_blendshapes=True,
+        output_facial_transformation_matrixes=True,
+        num_faces=max_faces,
+        min_face_detection_confidence=0.3,
+        min_face_presence_confidence=0.3,
         min_tracking_confidence=0.3
     )
+    
+    landmarker = vision.FaceLandmarker.create_from_options(options)
 
     while True:
         try:
@@ -26,64 +35,76 @@ def gaze_worker(frame_queue, result_queue, max_faces):
                 break
                 
             rgb_frame = frame_data
+            # Convert to MediaPipe Image
+            mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb_frame)
             
             try:
-                results = face_mesh.process(rgb_frame)
+                results = landmarker.detect(mp_image)
                 
                 status_message = "No Face Detected"
                 
-                if results.multi_face_landmarks:
-                    num_faces = len(results.multi_face_landmarks)
+                if results.face_landmarks:
+                    num_faces = len(results.face_landmarks)
                     
                     if num_faces > max_faces:
                         status_message = f"ERROR: Too many faces ({num_faces} > {max_faces})"
                     else:
-                        # Process the first face (assuming the main user is the primary face)
-                        # In a future iteration, we could select the largest face.
-                        face_landmarks = results.multi_face_landmarks[0]
+                        face_landmarks = results.face_landmarks[0]
                         
-                        mesh_points = np.array([np.multiply([p.x, p.y], [rgb_frame.shape[1], rgb_frame.shape[0]]).astype(int) for p in face_landmarks.landmark])
+                        # Convert normalized landmarks to pixel coordinates
+                        h, w, _ = rgb_frame.shape
+                        mesh_points = np.array([[int(l.x * w), int(l.y * h)] for l in face_landmarks])
                         
                         # --- IRIS RATIO LOGIC ---
-                        # Left Eye: 33 (Left), 133 (Right), 468 (Iris)
-                        # Right Eye: 362 (Left), 263 (Right), 473 (Iris)
+                        # Indices for indices in Face Mesh (Legacy):
+                        # P33 (Left Eye Left), P133 (Left Eye Right), P468 (Left Iris)
+                        # P362 (Right Eye Left), P263 (Right Eye Right), P473 (Right Iris)
                         
-                        def get_ratio(eye_points, iris_center):
-                            lc = eye_points[0]
-                            rc = eye_points[1]
-                            full_width = np.linalg.norm(rc - lc)
-                            if full_width == 0: return 0.5
-                            dist_to_left = np.linalg.norm(iris_center - lc)
-                            return dist_to_left / full_width
+                        def get_ratio(p1, p2, iris_center):
+                            full_dist = np.linalg.norm(p2 - p1)
+                            if full_dist == 0: return 0.5
+                            dist_to_p1 = np.linalg.norm(iris_center - p1)
+                            return dist_to_p1 / full_dist
 
-                        p33, p133, p468 = mesh_points[33], mesh_points[133], mesh_points[468]
-                        ratio_left = get_ratio([p33, p133], p468)
-                        
-                        p362, p263, p473 = mesh_points[362], mesh_points[263], mesh_points[473]
-                        ratio_right = get_ratio([p362, p263], p473)
-                        
-                        avg_ratio = (ratio_left + ratio_right) / 2
-                        
-                        # --- 30 DEGREE ANGLE LOGIC ---
-                        # Calibrating: 
-                        # 0.5 is Center.
-                        # We assume Safe Zone is roughly 0.35 to 0.65.
-                        # < 0.35 -> Looking Left (Camera Right) > 30 deg
-                        # > 0.65 -> Looking Right (Camera Left) > 30 deg
-                        # Note: Directions are mirrored relative to the person vs camera.
-                        
-                        SAFE_MIN = 0.35
-                        SAFE_MAX = 0.65
-                        
-                        if avg_ratio < SAFE_MIN:
-                            status_message = "WARNING: Gaze > 30 deg (Right)"
-                        elif avg_ratio > SAFE_MAX:
-                            status_message = "WARNING: Gaze > 30 deg (Left)"
+                        if len(mesh_points) > 473:
+                            # Horizontal
+                            p33, p133, p468 = mesh_points[33], mesh_points[133], mesh_points[468]
+                            ratio_left_h = get_ratio(p33, p133, p468)
+                            p362, p263, p473 = mesh_points[362], mesh_points[263], mesh_points[473]
+                            ratio_right_h = get_ratio(p362, p263, p473)
+                            avg_ratio_h = (ratio_left_h + ratio_right_h) / 2
+                            
+                            # Vertical
+                            p159, p145, p468_v = mesh_points[159], mesh_points[145], mesh_points[468]
+                            dist_eye_v = np.linalg.norm(p159 - p145)
+                            
+                            ratio_left_v = get_ratio(p159, p145, p468_v)
+                            p386, p374, p473_v = mesh_points[386], mesh_points[374], mesh_points[473]
+                            ratio_right_v = get_ratio(p386, p374, p473_v)
+                            avg_ratio_v = (ratio_left_v + ratio_right_v) / 2
+                            
+                            # Thresholds
+                            SAFE_H_MIN, SAFE_H_MAX = 0.42, 0.58
+                            SAFE_V_MIN, SAFE_V_MAX = 0.38, 0.62 # Narrowed but we will ignore blinks
+                            
+                            is_blinking = dist_eye_v < (h * 0.012) # Empirical threshold for closed eye
+
+                            if avg_ratio_h < SAFE_H_MIN:
+                                status_message = "WARNING: Looking Away (Right)"
+                            elif avg_ratio_h > SAFE_H_MAX:
+                                status_message = "WARNING: Looking Away (Left)"
+                            elif is_blinking:
+                                status_message = "Safe: Center (Blink)"
+                            elif avg_ratio_v < SAFE_V_MIN:
+                                status_message = "WARNING: Looking Away (Up)"
+                            elif avg_ratio_v > SAFE_V_MAX:
+                                status_message = "WARNING: Looking Away (Down)"
+                            else:
+                                status_message = "Safe: Center"
                         else:
-                            status_message = "Safe: Center"
+                            status_message = "Face Mesh Limited"
 
                 # ALWAYS put result to clear the "Initializing" state
-                # Clear queue if full to ensure fresh data
                 if result_queue.full():
                     try:
                         result_queue.get_nowait()
@@ -97,7 +118,7 @@ def gaze_worker(frame_queue, result_queue, max_faces):
         except Exception as e:
             print(f"Gaze Worker Error: {e}")
 
-    face_mesh.close()
+    landmarker.close()
 
 class GazeDetector:
     def __init__(self, max_faces=1):
