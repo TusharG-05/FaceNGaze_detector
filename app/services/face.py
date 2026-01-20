@@ -42,7 +42,7 @@ def face_recognition_worker(frame_queue: multiprocessing.Queue, result_queue: mu
                 encs = []
                 
             dt = time.time() - t0
-            # print(f"Face Process Time: {dt*1000:.1f}ms | Scale: {s:.2f} | Faces: {len(locs)}") # Debug log
+            print(f"Face Process Time: {dt*1000:.1f}ms | Scale: {s:.2f} | Faces: {len(locs)}") # Debug log
 
             match, conf = False, 1.0
             if encs and known_encoding is not None:
