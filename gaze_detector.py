@@ -1,5 +1,6 @@
 import cv2
 import multiprocessing
+import time
 import numpy as np
 import mediapipe as mp
 from mediapipe.tasks import python
@@ -19,6 +20,8 @@ def gaze_worker(frame_queue, result_queue, max_faces):
     )
     
     landmarker = vision.FaceLandmarker.create_from_options(options)
+    
+    blink_start_time = None
     
     while True:
         try:
@@ -88,18 +91,39 @@ def gaze_worker(frame_queue, result_queue, max_faces):
                             
                             is_blinking = dist_eye_v < (h * 0.012) # Blinking threshold
 
+                            # LOGIC FLOW REORDERED
+                            # 1. Check Explicit Gaze Direction (Pupils)
                             if avg_ratio_h < SAFE_H_MIN:
                                 status_message = "WARNING: Looking Away (Right)"
+                                blink_start_time = None
                             elif avg_ratio_h > SAFE_H_MAX:
                                 status_message = "WARNING: Looking Away (Left)"
-                            elif is_blinking:
-                                status_message = "Safe: Center (Blink)"
+                                blink_start_time = None
                             elif avg_ratio_v < SAFE_V_MIN:
                                 status_message = "WARNING: Looking Away (Up)"
+                                blink_start_time = None
                             elif avg_ratio_v > SAFE_V_MAX:
                                 status_message = "WARNING: Looking Away (Down)"
+                                blink_start_time = None
+                                
+                            # 2. Check Blink / Closed Eyes (Timer Based)
+                            elif is_blinking:
+                                if blink_start_time is None:
+                                    blink_start_time = time.time()
+                                
+                                # Check duration
+                                elapsed = time.time() - blink_start_time
+                                if elapsed > 1.0:
+                                    # User closed eyes for > 1 sec -> Consider as Looking Down / Sleeping
+                                    status_message = "WARNING: Looking Away (Down)"
+                                else:
+                                    # Quick blink
+                                    status_message = "Safe: Center (Blink)"
+                            
                             else:
+                                # Safe Center, Eyes Open
                                 status_message = "Safe: Center"
+                                blink_start_time = None
                         else:
                             status_message = "Face Mesh Limited"
 
