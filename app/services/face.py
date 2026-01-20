@@ -26,7 +26,7 @@ def face_recognition_worker(frame_queue: multiprocessing.Queue, result_queue: mu
             
             # Scale frame for speed
             h, w = frame_rgb.shape[:2]
-            target_h = 540
+            target_h = 360 # Adjusted to 360p: Better than 320p, faster than 540p
             s = target_h / h if h > target_h else 1.0
             
             # Resize if needed
