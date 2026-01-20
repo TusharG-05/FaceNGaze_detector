@@ -6,9 +6,9 @@ import mediapipe as mp
 from mediapipe.tasks import python
 from mediapipe.tasks.python import vision
 
-def gaze_worker(frame_queue, result_queue, max_faces):
+def gaze_worker(frame_queue, result_queue, max_faces, model_path):
     # Initialize MediaPipe FaceLandmarker
-    base_options = python.BaseOptions(model_asset_path='face_landmarker.task')
+    base_options = python.BaseOptions(model_asset_path=model_path)
     options = vision.FaceLandmarkerOptions(
         base_options=base_options,
         output_face_blendshapes=True,
@@ -147,14 +147,16 @@ def gaze_worker(frame_queue, result_queue, max_faces):
 # BACKEND API: GazeDetector Class
 # =============================================================================
 class GazeDetector:
-    def __init__(self, max_faces=1):
+    def __init__(self, model_path='app/assets/face_landmarker.task', max_faces=1):
         print("Initializing GazeDetector...")
+        self.model_path = model_path
         self.frame_queue = multiprocessing.Queue(maxsize=1)
         self.result_queue = multiprocessing.Queue(maxsize=1)
         
+        print(f"GazeDetector initialized with model: {model_path}")
         self.worker = multiprocessing.Process(
             target=gaze_worker,
-            args=(self.frame_queue, self.result_queue, max_faces)
+            args=(self.frame_queue, self.result_queue, max_faces, self.model_path)
         )
         self.worker.daemon = True
         self.worker.start()
@@ -163,6 +165,7 @@ class GazeDetector:
     def process_frame(self, frame_bgr):
             # MediaPipe expects RGB
         try:
+            # print("Gaze: Processing frame...") # Verbose debug
             frame_rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
             frame_rgb.flags.writeable = False
             

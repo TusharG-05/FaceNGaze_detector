@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Face & Gaze Detection System</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #1a1a1a;
+            color: #ffffff;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            margin: 0;
+        }
+
+        h1 {
+            border-bottom: 2px solid #00ffcc;
+            padding-bottom: 10px;
+            margin-bottom: 20px;
+        }
+
+        .video-container {
+            border: 5px solid #333;
+            border-radius: 10px;
+            box-shadow: 0 0 20px rgba(0, 0, 0, 0.5);
+            overflow: hidden;
+        }
+
+        img {
+            display: block;
+            background-color: #000;
+        }
+
+        .status {
+            margin-top: 20px;
+            color: #aaa;
+        }
+    </style>
+</head>
+
+<body>
+    <h1>Face & Gaze Security Monitor</h1>
+    <div class="video-container">
+        <img src="/video_feed" width="640" height="480" alt="Video Feed">
+    </div>
+
+    <div class="controls" style="margin-top: 20px; text-align: center;">
+        <h3>Update Authorized Person</h3>
+        <input type="file" id="fileInput" accept="image/*">
+        <button onclick="uploadImage()">Upload New Face</button>
+        <p id="uploadStatus"></p>
+    </div>
+
+    <div class="status">
+        <p>System Active • Real-time Monitoring</p>
+    </div>
+
+    <script>
+        async function uploadImage() {
+            const fileInput = document.getElementById('fileInput');
+            const status = document.getElementById('uploadStatus');
+
+            if (fileInput.files.length === 0) {
+                status.textContent = "Please select a file first.";
+                status.style.color = "red";
+                return;
+            }
+
+            const formData = new FormData();
+            formData.append('file', fileInput.files[0]);
+
+            status.textContent = "Uploading...";
+            status.style.color = "#aaa";
+
+            try {
+                const response = await fetch('/upload-identity', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                if (response.ok) {
+                    const data = await response.json();
+                    status.textContent = "Success: " + data.message;
+                    status.style.color = "#00ffcc";
+                    // Reload page to refresh any server state if needed, though video stream monitors backend
+                } else {
+                    status.textContent = "Error uploading file.";
+                    status.style.color = "red";
+                }
+            } catch (error) {
+                console.error('Error:', error);
+                status.textContent = "Upload failed.";
+                status.style.color = "red";
+            }
+        }
+    </script>
+</body>
+
+</html>
